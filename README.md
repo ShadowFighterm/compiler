@@ -8,36 +8,22 @@ We provide **two versions of the lexer**:
 
 ---
 
-## 📂 Repository Structure
-
-src/
-├── main.rs # Entry point: runs either handwritten or regex lexer
-├── lexer.rs # Handwritten lexer implementation
-├── regex_lexer.rs # Regex-based lexer implementation
-├── token.rs # Token definitions
-sample.src # Example input file
-README.md # This file
-
-yaml
-Copy code
-
----
-
 ## 🚀 How to Build & Run
 
 ### 1. Clone the repository
 ```bash
-git clone <your-repo-url>
+git clone <repo-link>
 cd compiler
+```
 2. Build the project
-bash
-Copy code
+```bash
 cargo build
+```
 3. Run with Handwritten Lexer
-bash
-Copy code
+```bash
 cargo run -- hand sample.src
+```
 4. Run with Regex Lexer
-bash
-Copy code
+```bash
 cargo run -- regex sample.src
+```
