@@ -15,15 +15,15 @@ We provide **two versions of the lexer**:
 git clone <repo-link>
 cd compiler
 ```
-2. Build the project
+### 2. Build the project
 ```bash
 cargo build
 ```
-3. Run with Handwritten Lexer
+### 3. Run with Handwritten Lexer
 ```bash
 cargo run -- hand sample.src
 ```
-4. Run with Regex Lexer
+### 4. Run with Regex Lexer
 ```bash
 cargo run -- regex sample.src
 ```
