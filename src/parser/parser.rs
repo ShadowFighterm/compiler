@@ -464,4 +464,28 @@ impl<'a> Parser<'a> {
         }
         
         self.consume(&TokenKind::T_PARENR, "')' after parameters")?;
+
+            // Return type
+            let return_type = if self.match_token(&TokenKind::T_COLON) {
+                if let Some(token) = self.advance() {
+                    Some(token.kind.clone())
+                } else {
+                    let (line, col) = self.peek().map(|t| (t.line, t.col)).unwrap_or((0, 0));
+                    return Err(ParseError { kind: ParseErrorKind::ExpectedTypeToken, line, col });
+                }
+            } else {
+                None
+            };
+            
+            self.consume(&TokenKind::T_BRACEL, "'{' after function signature")?;
+            let body = Box::new(self.parse_block_statement()?);
+            
+            Ok(Decl::Function {
+                name,
+                params,
+                return_type,
+                body,
+            })
+        }
+
 }
