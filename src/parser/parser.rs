@@ -354,5 +354,114 @@ impl<'a> Parser<'a> {
         self.consume(&TokenKind::T_SEMICOLON, "';' after expression")?;
         Ok(Stmt::Expr(expr))
     }
+    
+    fn parse_declaration_statement(&mut self) -> Result<Stmt, ParseError> {
+        let type_annot = self.advance().map(|t| t.kind.clone()); // Consume type token
+        let name = if let Some(token) = self.advance() {
+            if let TokenKind::T_IDENTIFIER(n) = &token.kind {
+                n.clone()
+            } else {
+                let (line, col) = (token.line, token.col);
+                return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
+            }
+        } else {
+            let (line, col) = self.previous().map(|t| (t.line, t.col)).unwrap_or((0, 0));
+            return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
+        };
+        
+        let value = if self.match_token(&TokenKind::T_ASSIGNOP) {
+            self.parse_expression()?
+        } else {
+            // Default values based on type
+            match &type_annot {
+                Some(TokenKind::T_INT) => Expr::Integer(0),
+                Some(TokenKind::T_FLOAT) => Expr::Float(0.0),
+                Some(TokenKind::T_BOOL) => Expr::Boolean(false),
+                Some(TokenKind::T_STRING) => Expr::StringLit("".to_string()),
+                _ => {
+                    let (line, col) = self.previous().map(|t| (t.line, t.col)).unwrap_or((0, 0));
+                    return Err(ParseError { kind: ParseErrorKind::ExpectedTypeToken, line, col });
+                }
+            }
+        };
+        
+        self.consume(&TokenKind::T_SEMICOLON, "';' after variable declaration")?;
+        Ok(Stmt::Let {
+            name,
+            type_annot,
+            value,
+        })
+    }
 
+    // declaration parsing 
+    fn parse_declaration(&mut self) -> Result<Decl, ParseError> {
+        if self.match_token(&TokenKind::T_FUNCTION) {
+            self.parse_function_declaration()
+        } else if self.is_type_token(self.peek()) {
+            self.parse_global_var_declaration()
+        } else {
+            // Treat as statement
+            let stmt = self.parse_statement()?;
+            Ok(Decl::GlobalVar {
+                name: "".to_string(), // Placeholder
+                type_annot: None,
+                value: Some(match stmt {
+                    Stmt::Expr(expr) => expr,
+                    _ => {
+                        let (line, col) = self.peek().map(|t| (t.line, t.col)).unwrap_or((0, 0));
+                        return Err(ParseError { kind: ParseErrorKind::Expected("expression".to_string()), line, col });
+                    }
+                }),
+            })
+        }
+    }
+
+    fn parse_function_declaration(&mut self) -> Result<Decl, ParseError> {
+        let name = if let Some(token) = self.advance() {
+            if let TokenKind::T_IDENTIFIER(n) = &token.kind {
+                n.clone()
+            } else {
+                let (line, col) = (token.line, token.col);
+                return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
+            }
+        } else {
+            let (line, col) = self.previous().map(|t| (t.line, t.col)).unwrap_or((0, 0));
+            return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
+        };
+        
+        self.consume(&TokenKind::T_PARENL, "'(' after function name")?;
+        
+        let mut params = Vec::new();
+        if !self.check(&TokenKind::T_PARENR) {
+            loop {
+                let param_type = if let Some(token) = self.advance() {
+                    token.kind.clone()
+                } else {
+                    let (line, col) = self.peek().map(|t| (t.line, t.col)).unwrap_or((0, 0));
+                    return Err(ParseError { kind: ParseErrorKind::ExpectedTypeToken, line, col });
+                };
+                let param_name = if let Some(token) = self.advance() {
+                    if let TokenKind::T_IDENTIFIER(n) = &token.kind {
+                        n.clone()
+                    } else {
+                        let (line, col) = (token.line, token.col);
+                        return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
+                    }
+                } else {
+                    let (line, col) = self.previous().map(|t| (t.line, t.col)).unwrap_or((0, 0));
+                    return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
+                };
+                
+                params.push(Param {
+                    name: param_name,
+                    param_type,
+                });
+                
+                if !self.match_token(&TokenKind::T_COMMA) {
+                    break;
+                }
+            }
+        }
+        
+        self.consume(&TokenKind::T_PARENR, "')' after parameters")?;
 }
