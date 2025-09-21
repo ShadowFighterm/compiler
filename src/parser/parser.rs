@@ -236,4 +236,123 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // statement parsing
+    fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        if self.match_token(&TokenKind::T_RETURN) {
+            return self.parse_return_statement();
+        }
+        if self.match_token(&TokenKind::T_IF) {
+            return self.parse_if_statement();
+        }
+        if self.match_token(&TokenKind::T_WHILE) {
+            return self.parse_while_statement();
+        }
+        if self.match_token(&TokenKind::T_FOR) {
+            return self.parse_for_statement();
+        }
+        if self.match_token(&TokenKind::T_BRACEL) {
+            return self.parse_block_statement();
+        }
+        
+        // Variable declaration or expression statement
+        if self.is_type_token(self.peek()) {
+            self.parse_declaration_statement()
+        } else {
+            self.parse_expression_statement()
+        }
+    }
+
+    fn parse_return_statement(&mut self) -> Result<Stmt, ParseError> {
+        let value = if !self.check(&TokenKind::T_SEMICOLON) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        self.consume(&TokenKind::T_SEMICOLON, "';' after return value")?;
+        Ok(Stmt::Return(value))
+    }
+
+    fn parse_if_statement(&mut self) -> Result<Stmt, ParseError> {
+        self.consume(&TokenKind::T_PARENL, "'(' after 'if'")?;
+        let condition = self.parse_expression()?;
+        self.consume(&TokenKind::T_PARENR, "')' after condition")?;
+        
+        let then_branch = Box::new(self.parse_statement()?);
+        let else_branch = if self.match_token(&TokenKind::T_ELSE) {
+            Some(Box::new(self.parse_statement()?))
+        } else {
+            None
+        };
+        
+        Ok(Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
+    }
+
+    fn parse_while_statement(&mut self) -> Result<Stmt, ParseError> {
+        self.consume(&TokenKind::T_PARENL, "'(' after 'while'")?;
+        let condition = self.parse_expression()?;
+        self.consume(&TokenKind::T_PARENR, "')' after condition")?;
+        let body = Box::new(self.parse_statement()?);
+        
+        Ok(Stmt::While { condition, body })
+    }
+
+    fn parse_for_statement(&mut self) -> Result<Stmt, ParseError> {
+        self.consume(&TokenKind::T_PARENL, "'(' after 'for'")?;
+        
+        // Initializer
+        let init = if self.match_token(&TokenKind::T_SEMICOLON) {
+            None
+        } else if self.is_type_token(self.peek()) {
+            Some(Box::new(self.parse_declaration_statement()?))
+        } else {
+            Some(Box::new(self.parse_expression_statement()?))
+        };
+        
+        // Condition
+        let condition = if !self.check(&TokenKind::T_SEMICOLON) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        self.consume(&TokenKind::T_SEMICOLON, "';' after loop condition")?;
+        
+        // Increment
+        let increment = if !self.check(&TokenKind::T_PARENR) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        self.consume(&TokenKind::T_PARENR, "')' after for clauses")?;
+        
+        let body = Box::new(self.parse_statement()?);
+        
+        Ok(Stmt::For {
+            init,
+            condition,
+            increment,
+            body,
+        })
+    }
+
+    fn parse_block_statement(&mut self) -> Result<Stmt, ParseError> {
+        let mut statements = Vec::new();
+        
+        while !self.check(&TokenKind::T_BRACER) && !self.is_at_end() {
+            statements.push(self.parse_statement()?);  // Changed to parse_statement
+        }
+        
+        self.consume(&TokenKind::T_BRACER, "'}' after block")?;
+        Ok(Stmt::Block(statements))
+    }
+
+    fn parse_expression_statement(&mut self) -> Result<Stmt, ParseError> {
+        let expr = self.parse_expression()?;
+        self.consume(&TokenKind::T_SEMICOLON, "';' after expression")?;
+        Ok(Stmt::Expr(expr))
+    }
+
 }
