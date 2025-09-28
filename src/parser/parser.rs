@@ -488,4 +488,50 @@ impl<'a> Parser<'a> {
             })
         }
 
+    fn parse_global_var_declaration(&mut self) -> Result<Decl, ParseError> {
+        let type_annot = self.advance().map(|t| t.kind.clone());
+        let name = if let Some(token) = self.advance() {
+            if let TokenKind::T_IDENTIFIER(n) = &token.kind {
+                n.clone()
+            } else {
+                let (line, col) = (token.line, token.col);
+                return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
+            }
+        } else {
+            let (line, col) = self.previous().map(|t| (t.line, t.col)).unwrap_or((0, 0));
+            return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
+        };
+        
+        let value = if self.match_token(&TokenKind::T_ASSIGNOP) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        
+        self.consume(&TokenKind::T_SEMICOLON, "';' after declaration")?;
+        
+        Ok(Decl::GlobalVar {
+            name,
+            type_annot,
+            value,
+        })
+    }
+
+    fn is_type_token(&self, token: Option<&Token>) -> bool {
+        matches!(token.as_ref().map(|t| &t.kind), Some(
+            TokenKind::T_INT | TokenKind::T_FLOAT | 
+            TokenKind::T_BOOL | TokenKind::T_STRING
+        ))
+    }
+
+    // TOP-LEVEL PARSING 
+    pub fn parse_program(&mut self) -> Result<Program, ParseError> {
+        let mut declarations = Vec::new();
+        
+        while !self.is_at_end() {
+            declarations.push(self.parse_declaration()?);
+        }
+        
+        Ok(Program { declarations })
+    }
 }
