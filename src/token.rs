@@ -14,6 +14,8 @@ pub enum TokenKind {
     T_ELSE,
     T_FOR,
     T_WHILE,
+    T_BREAK,
+
 
     // Identifiers & literals
     T_IDENTIFIER(String),
@@ -58,6 +60,7 @@ pub enum TokenKind {
     T_TILDE,
     T_NOT,
 
+
     T_EOF,
 }
 
@@ -91,6 +94,8 @@ impl fmt::Display for TokenKind {
             T_ELSE => write!(f, "T_ELSE"),
             T_FOR => write!(f, "T_FOR"),
             T_WHILE => write!(f, "T_WHILE"),
+            T_BREAK => write!(f, "T_BREAK"),
+
 
             T_IDENTIFIER(s) => write!(f, "T_IDENTIFIER(\"{}\")", s),
             T_INTLIT(v) => write!(f, "T_INTLIT({})", v),
