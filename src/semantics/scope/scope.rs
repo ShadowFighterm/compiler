@@ -1,86 +1,101 @@
 use std::collections::HashMap;
 
 #[derive(Debug)]
-pub enum ScopeError{
+pub enum ScopeError {
     UndeclaredVariableAccessed,
     UndefinedFunctionCalled,
     VariableRedefinition,
     FunctionPrototypeRedefinition,
 }
 
-#[derive(Debug,Clone)]
-pub enum symbolKind{
+#[derive(Debug, Clone)]
+pub enum SymbolKind {
     Variable,
-    Function,
+    Function { params: Vec<String>, defined: bool },
     Parameter,
 }
 
-#[derive(Debug,Clone)]
-pub struct Symbol{
+#[derive(Debug, Clone)]
+pub struct Symbol {
     pub name: String,
-    pub kind: symbolKind,
+    pub kind: SymbolKind,
     pub scope_level: usize,
-    pub data_type: Option<String>,
+    pub symbol_type: Option<String>,
     pub value: Option<String>,
 }
 
 #[derive(Debug)]
-pub struct Scope{
+pub struct Scope {
     pub symbols: HashMap<String, Symbol>,
     pub parent: Option<Box<Scope>>,
 }
 
-impl Scope{
-    pub fn new(parent: Option<Box<Scope>>)->Self{
-        Scope{symbols: HashMap::new(),parent,}
+impl Scope {
+    pub fn new(parent: Option<Box<Scope>>) -> Self {
+        Scope {
+            symbols: HashMap::new(),
+            parent,
+        }
     }
 }
 
 #[derive(Debug)]
-pub struct ScopeStack{
+pub struct ScopeStack {
     pub current: Option<Box<Scope>>,
 }
 
-impl ScopeStack{
-    pub fn new()->Self{
-        ScopeStack{ current: None }
-    }
-    
-    pub fn push_scope(&mut self){
-        let new_scope = Scope::new(self.current.take());
-        self.current = Some(Box::new(new_scope)) 
+impl ScopeStack {
+    pub fn new() -> Self {
+        ScopeStack { current: None }
     }
 
-    pub fn pop_scope(&mut self){
-        if let Some(cur) = self.current.take(){
+    pub fn push_scope(&mut self) {
+        let new_scope = Scope::new(self.current.take());
+        self.current = Some(Box::new(new_scope))
+    }
+
+    pub fn pop_scope(&mut self) {
+        if let Some(cur) = self.current.take() {
             self.current = cur.parent;
         }
     }
 
-    pub fn insert_symbol(&mut self, name: String, symbol: Symbol,) -> Result<(), ScopeError>
-    {
-        if let Some(curr) = self.current.as_mut() {
-            if curr.symbols.contains_key(&name) {
-                return Err(ScopeError::VariableRedefinition);
-            }
-            curr.symbols.insert(name, symbol);
-            Ok(())
-        } else {
-            // No scope exists yet, create global
-            self.push_scope();
-            self.insert_symbol(name, symbol)
-        }
+    fn current_scope_mut(&mut self) -> Option<&mut Scope> {
+        self.current.as_deref_mut()
     }
-    pub fn lookup_symbol(&self, name: &str) -> Result<Symbol, ScopeError> {
-        let mut scope_opt = self.current.as_ref();
-        while let Some(scope) = scope_opt {
-            if let Some(sym) = scope.symbols.get(name) {
-                return Ok(sym.clone());
+
+    pub fn insert_symbol(&mut self, name: String, symbol: Symbol) -> Result<(), ScopeError> {
+        if let Some(scope) = self.current_scope_mut() {
+            if scope.symbols.contains_key(&name) {
+                match &symbol.kind {
+                    SymbolKind::Variable => return Err(ScopeError::VariableRedefinition),
+                    SymbolKind::Function { defined: false, .. } => {
+                        return Err(ScopeError::FunctionPrototypeRedefinition);
+                    }
+                    _ => {}
+                }
             }
-            scope_opt = scope.parent.as_ref();
+            scope.symbols.insert(name, symbol);
         }
-        Err(ScopeError::UndeclaredVariableAccessed)
+        Ok(())
+    }
+
+    pub fn lookup_function(&self, name: &str) -> Result<&Symbol, ScopeError> {
+        let mut current = self.current.as_deref();
+
+        while let Some(scope) = current {
+            if let Some(sym) = scope.symbols.get(name) {
+                if let SymbolKind::Function { defined, .. } = &sym.kind {
+                    if *defined {
+                        return Ok(sym);
+                    } else {
+                        return Err(ScopeError::UndefinedFunctionCalled);
+                    }
+                }
+            }
+            current = scope.parent.as_deref();
+        }
+
+        Err(ScopeError::UndefinedFunctionCalled)
     }
 }
-
-
