@@ -1,4 +1,5 @@
 #![allow(unused)]
+#![allow(non_snake_case)]
 mod lexer;
 mod token;
 mod parser;  // Add parser module
