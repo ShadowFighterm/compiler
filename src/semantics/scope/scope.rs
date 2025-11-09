@@ -93,21 +93,36 @@ impl ScopeStack {
     }
 
     pub fn lookup_function(&self, name: &str) -> Result<&Symbol, ScopeError> {
+        // begin search from this current scope
         let mut current = self.current.as_deref();
-
+    
+        // climb upward through parent scopes
         while let Some(scope) = current {
+            // find the symbol in the current scope
             if let Some(sym) = scope.symbols.get(name) {
-                if let SymbolKind::Function { defined, .. } = &sym.kind {
-                    if *defined {
+
+                match &sym.kind {
+                    SymbolKind::Function { defined: true, .. } => {
                         return Ok(sym);
-                    } else {
+                    }
+                    // found prototype
+                    SymbolKind::Function { defined: false, .. } => {
+                        return Err(ScopeError::UndefinedFunctionCalled);
+                    }
+                    // found something, but its not a function i.e., var()
+                    _ => {
                         return Err(ScopeError::UndefinedFunctionCalled);
                     }
                 }
             }
+    
+            // stepp up the ladder
             current = scope.parent.as_deref();
         }
-
+    
+        // symbol not found in any scope
         Err(ScopeError::UndefinedFunctionCalled)
     }
+    
+    
 }
