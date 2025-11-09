@@ -6,6 +6,8 @@ pub enum ScopeError {
     UndefinedFunctionCalled,
     VariableRedefinition,
     FunctionPrototypeRedefinition,
+    FunctionRedefinition,
+    FunctionRedefinitionAsPrototype,
 }
 
 #[derive(Debug, Clone)]
@@ -25,22 +27,20 @@ pub struct Symbol {
 }
 
 #[derive(Debug)]
-pub struct Scope {
+pub struct Scope {  
     pub symbols: HashMap<String, Symbol>,
-    pub parent: Option<Box<Scope>>,
+    pub parent: Option<Box<Scope>>,  
 }
 
 impl Scope {
     pub fn new(parent: Option<Box<Scope>>) -> Self {
-        Scope {
-            symbols: HashMap::new(),
-            parent,
+        Scope {symbols: HashMap::new(), parent,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct ScopeStack {
+pub struct ScopeStack { // Spaghetti Stack
     pub current: Option<Box<Scope>>,
 }
 
@@ -50,7 +50,7 @@ impl ScopeStack {
     }
 
     pub fn push_scope(&mut self) {
-        let new_scope = Scope::new(self.current.take());
+        let new_scope = Scope::new(self.current.take()); // .take() returns the current original value, leaving None in its place
         self.current = Some(Box::new(new_scope))
     }
 
@@ -65,14 +65,26 @@ impl ScopeStack {
     }
 
     pub fn insert_symbol(&mut self, name: String, symbol: Symbol) -> Result<(), ScopeError> {
-        if let Some(scope) = self.current_scope_mut() {
+         
+        if let Some(scope) = self.current_scope_mut() 
+        //  attempting to unwrap an Option. If it contains a value, assign it to scope and run the block; otherwise skip the block.
+        { 
             if scope.symbols.contains_key(&name) {
-                match &symbol.kind {
-                    SymbolKind::Variable => return Err(ScopeError::VariableRedefinition),
-                    SymbolKind::Function { defined: false, .. } => {
+                //     new symbol kind  v/s existing symbol kind
+                match (&symbol.kind, &scope.symbols[&name].kind) {
+                    (SymbolKind::Variable, SymbolKind::Variable)  => {
+                        return Err(ScopeError::VariableRedefinition)
+                    }
+                    (SymbolKind::Function { defined: false, .. },SymbolKind::Function { defined: false, .. })  => {
                         return Err(ScopeError::FunctionPrototypeRedefinition);
                     }
-                    _ => {}
+                    (SymbolKind::Function { defined: true, .. },SymbolKind::Function { defined: true, .. })  => {
+                        return Err(ScopeError::FunctionRedefinition);
+                    }
+                    (SymbolKind::Function { defined: false, .. },SymbolKind::Function { defined: true, .. })  => {
+                        return Err(ScopeError::FunctionRedefinitionAsPrototype);
+                    }
+                    _ => {} //Anything else is ignored
                 }
             }
             scope.symbols.insert(name, symbol);
