@@ -1,20 +1,43 @@
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Type { //Had to introduce Type enum to make function signatures work
+    Int,
+    Float,
+    Bool,
+    Char,
+    Void,
+    Custom(String),           
+    Array(Box<Type>, usize),  
+    Pointer(Box<Type>),
+}
+
 #[derive(Debug)]
 pub enum ScopeError {
-    UndeclaredVariableAccessed,
-    UndefinedFunctionCalled,
-    VariableRedefinition,
+    // name resolution / kind mismatch
+    UndeclaredIdentifier,
+    FoundButWrongKind,              
+    // functions
+    UndefinedFunctionCalled,        // only prototype found (or not found)
     FunctionPrototypeRedefinition,
     FunctionRedefinition,
     FunctionRedefinitionAsPrototype,
+    // variables
+    VariableRedefinition,
+    VariableUsedBeforeInit,
+    // generic
+    NoCurrentScope,
 }
 
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
-    Variable,
-    Function { params: Vec<String>, defined: bool },
+    Variable { mutable: bool }, 
     Parameter,
+    Function {
+        params: Vec<Type>,
+        return_type: Type,
+        defined: bool, 
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -22,25 +45,72 @@ pub struct Symbol {
     pub name: String,
     pub kind: SymbolKind,
     pub scope_level: usize,
-    pub symbol_type: Option<String>,
-    pub value: Option<String>,
+    pub ty: Option<Type>,        
+    pub initialized: bool,       
 }
 
-#[derive(Debug)]
-pub struct Scope {  
-    pub symbols: HashMap<String, Symbol>,
-    pub parent: Option<Box<Scope>>,  
-}
+impl Symbol {
+    pub fn new_variable(name: impl Into<String>, ty: Type, mutable: bool, scope_level: usize, initialized: bool) -> Self {
+        Self {
+            name: name.into(),
+            kind: SymbolKind::Variable { mutable },
+            scope_level,
+            ty: Some(ty),
+            initialized,
+        }
+    }
 
-impl Scope {
-    pub fn new(parent: Option<Box<Scope>>) -> Self {
-        Scope {symbols: HashMap::new(), parent,
+    pub fn new_parameter(name: impl Into<String>, ty: Type, scope_level: usize) -> Self {
+        Self {
+            name: name.into(),
+            kind: SymbolKind::Parameter,
+            scope_level,
+            ty: Some(ty),
+            initialized: true, // parameters are considered initialized
+        }
+    }
+
+    pub fn new_function_prototype(name: impl Into<String>, params: Vec<Type>, return_type: Type, scope_level: usize) -> Self {
+        Self {
+            name: name.into(),
+            kind: SymbolKind::Function { params, return_type: return_type.clone(), defined: false },
+            scope_level,
+            ty: Some(return_type),
+            initialized: true,
+        }
+    }
+
+    pub fn new_function_definition(name: impl Into<String>, params: Vec<Type>, return_type: Type, scope_level: usize) -> Self {
+        Self {
+            name: name.into(),
+            kind: SymbolKind::Function { params, return_type: return_type.clone(), defined: true },
+            scope_level,
+            ty: Some(return_type),
+            initialized: true,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct ScopeStack { // Spaghetti Stack
+pub struct Scope {
+    pub symbols: HashMap<String, Symbol>,
+    pub parent: Option<Box<Scope>>,
+    pub level: usize,
+}
+
+impl Scope {
+    pub fn new(parent: Option<Box<Scope>>) -> Self {
+        let level = parent.as_ref().map(|p| p.level + 1).unwrap_or(0);
+        Scope {
+            symbols: HashMap::new(),
+            parent,
+            level,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ScopeStack {
     pub current: Option<Box<Scope>>,
 }
 
@@ -49,108 +119,170 @@ impl ScopeStack {
         ScopeStack { current: None }
     }
 
-    pub fn push_scope(&mut self) {
-        let new_scope = Scope::new(self.current.take()); // .take() returns the current original value, leaving None in its place
-        self.current = Some(Box::new(new_scope))
+    /// Enter a new inner scope
+    pub fn enter_scope(&mut self) {
+        let new_scope = Scope::new(self.current.take());
+        self.current = Some(Box::new(new_scope));
     }
 
-    pub fn pop_scope(&mut self) {
+    /// Exit current scope and return to parent
+    pub fn exit_scope(&mut self) {
         if let Some(cur) = self.current.take() {
             self.current = cur.parent;
         }
     }
 
-    fn current_scope_mut(&mut self) -> Option<&mut Scope> {
-        self.current.as_deref_mut()
+    fn current_scope_mut(&mut self) -> Result<&mut Scope, ScopeError> {
+        self.current.as_deref_mut().ok_or(ScopeError::NoCurrentScope)
     }
 
-    pub fn insert_symbol(&mut self, name: String, symbol: Symbol) -> Result<(), ScopeError> {
-         
-        if let Some(scope) = self.current_scope_mut() 
-        //  attempting to unwrap an Option. If it contains a value, assign it to scope and run the block; otherwise skip the block.
-        { 
-            if scope.symbols.contains_key(&name) {
-                //     new symbol kind  v/s existing symbol kind
-                match (&symbol.kind, &scope.symbols[&name].kind) {
-                    (SymbolKind::Variable, SymbolKind::Variable)  => {
-                        return Err(ScopeError::VariableRedefinition)
-                    }
-                    (SymbolKind::Function { defined: false, .. },SymbolKind::Function { defined: false, .. })  => {
-                        return Err(ScopeError::FunctionPrototypeRedefinition);
-                    }
-                    (SymbolKind::Function { defined: true, .. },SymbolKind::Function { defined: true, .. })  => {
-                        return Err(ScopeError::FunctionRedefinition);
-                    }
-                    (SymbolKind::Function { defined: false, .. },SymbolKind::Function { defined: true, .. })  => {
-                        return Err(ScopeError::FunctionRedefinitionAsPrototype);
-                    }
-                    _ => {} //Anything else is ignored
-                }
-            }
-            scope.symbols.insert(name, symbol);
+    fn current_scope(&self) -> Option<&Scope> {
+        self.current.as_deref()
+    }
+
+    /// Insert a variable into the current scope.
+    pub fn insert_variable(&mut self, name: String, ty: Type, mutable: bool, initialized: bool) -> Result<(), ScopeError> {
+        let scope = self.current_scope_mut()?;
+        if scope.symbols.contains_key(&name) {
+
+            return Err(ScopeError::VariableRedefinition);
         }
+        let sym = Symbol::new_variable(name.clone(), ty, mutable, scope.level, initialized);
+        scope.symbols.insert(name, sym);
         Ok(())
     }
 
-    pub fn lookup_function(&self, name: &str) -> Result<&Symbol, ScopeError> {
-        // begin search from this current scope
-
-        let mut current = self.current.as_deref();
-    
-        // climb upward through parent scopes
-        while let Some(scope) = current {
-            // find the symbol in the current scope
-            if let Some(sym) = scope.symbols.get(name) {
-                match &sym.kind {
-
-                    SymbolKind::Function { defined: true, .. } => {
-                        return Ok(sym);
-                    }
-                    // found prototype
-                    SymbolKind::Function { defined: false, .. } => {
-                        return Err(ScopeError::UndefinedFunctionCalled);
-                    }
-                    // found something, but its not a function i.e., var()
-                    _ => {
+ 
+    pub fn insert_function_prototype(&mut self, name: String, params: Vec<Type>, return_type: Type) -> Result<(), ScopeError> {
+        let scope = self.current_scope_mut()?;
+        if let Some(existing) = scope.symbols.get(&name) {
+            match &existing.kind {
+                SymbolKind::Function { defined: false, params: existing_params, return_type: existing_ret, .. } => {
+                    
+                    if &existing_params[..] == &params[..] && existing_ret == &return_type {
+                        return Err(ScopeError::FunctionPrototypeRedefinition);
+                    } else {
+                        return Err(ScopeError::FunctionPrototypeRedefinition);
                     }
                 }
+                SymbolKind::Function { defined: true, .. } => {
+                    return Err(ScopeError::FunctionRedefinitionAsPrototype);
+                }
+                _ => {
+                    return Err(ScopeError::VariableRedefinition); // name clash with variable/param
+                }
             }
-            // stepp up the ladder
+        }
+        let sym = Symbol::new_function_prototype(name.clone(), params, return_type, scope.level);
+        scope.symbols.insert(name, sym);
+        Ok(())
+    }
+
+    pub fn insert_function_definition(&mut self, name: String, params: Vec<Type>, return_type: Type) -> Result<(), ScopeError> {
+        let scope = self.current_scope_mut()?;
+        if let Some(existing) = scope.symbols.get(&name) {
+            match &existing.kind {
+                SymbolKind::Function { defined: false, params: existing_params, return_type: existing_ret, .. } => {
+                    
+                    if &existing_params[..] != &params[..] || existing_ret != &return_type {
+                        return Err(ScopeError::FunctionRedefinitionAsPrototype);
+                    } else {
+
+                        let sym = Symbol::new_function_definition(name.clone(), params, return_type, scope.level);
+                        scope.symbols.insert(name, sym);
+                        return Ok(());
+                    }
+                }
+                SymbolKind::Function { defined: true, .. } => {
+                    return Err(ScopeError::FunctionRedefinition);
+                }
+                _ => {
+                    return Err(ScopeError::VariableRedefinition); // name clash
+                }
+            }
+        }
+
+        let sym = Symbol::new_function_definition(name.clone(), params, return_type, scope.level);
+        scope.symbols.insert(name, sym);
+        Ok(())
+    }
+
+
+    fn find_symbol(&self, name: &str) -> Option<&Symbol> {
+        let mut current = self.current.as_deref();
+        while let Some(scope) = current {
+            if let Some(sym) = scope.symbols.get(name) {
+                return Some(sym);
+            }
             current = scope.parent.as_deref();
         }
-    
-        // symbol not found in any scope
+        None
+    }
+
+
+    pub fn lookup_variable(&self, name: &str) -> Result<&Symbol, ScopeError> {
+        if let Some(sym) = self.find_symbol(name) {
+            match &sym.kind {
+                SymbolKind::Variable { .. } | SymbolKind::Parameter => {
+                    if !sym.initialized {
+                        return Err(ScopeError::VariableUsedBeforeInit);
+                    }
+                    return Ok(sym);
+                }
+                SymbolKind::Function { .. } => {
+                    return Err(ScopeError::FoundButWrongKind);
+                }
+            }
+        }
+        Err(ScopeError::UndeclaredIdentifier)
+    }
+
+
+    pub fn lookup_function(&self, name: &str) -> Result<&Symbol, ScopeError> {
+        if let Some(sym) = self.find_symbol(name) {
+            match &sym.kind {
+                SymbolKind::Function { defined: true, .. } => return Ok(sym),
+                SymbolKind::Function { defined: false, .. } => return Err(ScopeError::UndefinedFunctionCalled),
+                _ => return Err(ScopeError::FoundButWrongKind),
+            }
+        }
         Err(ScopeError::UndefinedFunctionCalled)
     }
-    
-    pub fn lookup_variable(&self, name: &str) -> Result<&Symbol, ScopeError> {
-        let mut current = self.current.as_deref();
-    
+
+
+    pub fn lookup_symbol_any(&self, name: &str) -> Option<&Symbol> {
+        self.find_symbol(name)
+    }
+
+
+    pub fn mark_initialized(&mut self, name: &str) -> Result<(), ScopeError> {
+        // Need to find the symbol mutably in the chain of scopes
+        let mut current = self.current.as_deref_mut();
         while let Some(scope) = current {
-            if let Some(sym) = scope.symbols.get(name) {
-    
-                match &sym.kind {
-                    // found 
-                    SymbolKind::Variable => {
-                        return Ok(sym);
+            if let Some(sym) = scope.symbols.get_mut(name) {
+                match sym.kind {
+                    SymbolKind::Variable { .. } | SymbolKind::Parameter => {
+                        sym.initialized = true;
+                        return Ok(());
                     }
-    
-                    // parameter found
-                    SymbolKind::Parameter => {
-                        return Ok(sym);
-                    }
-    
-                    // found a function when expecting a variable 
-                    SymbolKind::Function { .. } => {
-                        return Err(ScopeError::UndeclaredVariableAccessed);
-                    }
+                    SymbolKind::Function { .. } => return Err(ScopeError::FoundButWrongKind),
                 }
             }
-    
-            current = scope.parent.as_deref();
+            current = scope.parent.as_deref_mut();
         }
-    
-        Err(ScopeError::UndeclaredVariableAccessed)
+        Err(ScopeError::UndeclaredIdentifier)
     }
-    
+
+    // helper
+    pub fn variable_exists(&self, name: &str) -> bool {
+        self.find_symbol(name).map_or(false, |s| {
+            matches!(s.kind, SymbolKind::Variable { .. } | SymbolKind::Parameter)
+        })
+    }
+
+    // helper
+    pub fn current_level(&self) -> usize {
+        self.current.as_deref().map(|s| s.level).unwrap_or(0)
+    }
 }
+
