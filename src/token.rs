@@ -10,6 +10,7 @@ pub enum TokenKind {
     T_BOOL,
     T_STRING,
     T_RETURN,
+    T_BREAK,
     T_IF,
     T_ELSE,
     T_FOR,
@@ -91,6 +92,7 @@ impl fmt::Display for TokenKind {
             T_ELSE => write!(f, "T_ELSE"),
             T_FOR => write!(f, "T_FOR"),
             T_WHILE => write!(f, "T_WHILE"),
+            T_BREAK => write!(f, "T_BREAK"),
 
             T_IDENTIFIER(s) => write!(f, "T_IDENTIFIER(\"{}\")", s),
             T_INTLIT(v) => write!(f, "T_INTLIT({})", v),
