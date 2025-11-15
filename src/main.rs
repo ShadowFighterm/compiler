@@ -4,11 +4,12 @@ mod lexer;
 mod token;
 mod parser;  // Add parser module
 mod semantics;
+use crate::semantics::scope;
 use crate::token::{Token, TokenKind};
 use crate::lexer::{HandLexer, RegexLexer};
 use crate::parser::parser::Parser;  // Import parser type
 use crate::parser::ast::{Expr, Stmt, Decl, Param, Program};  // Import AST types
-use semantics::scope::scope::{ScopeStack, Symbol, SymbolKind, Type, ScopeError};
+use crate::semantics::scope::scope::{ScopeStack, Symbol, SymbolKind, Type, ScopeError};
 use std::env;
 use std::fs;
 
@@ -88,6 +89,9 @@ fn print_program(program: &Program) {
                     println!(" (uninitialized)");
                 }
             }
+            Decl::Stmt(stmt) => {
+                println!("  Global statement: {:#?}", stmt);
+            }
         }
     }
 }
@@ -103,43 +107,46 @@ fn perform_scope_analysis(program: &Program) -> Vec<ScopeError> {
     for decl in &program.declarations {
         match decl {
             Decl::GlobalVar { name, type_annot, value } => {
-                let ty = type_annot.as_ref().map(|t| token_to_type(t.clone())).unwrap_or(Type::Void);
+                let ty = if let Some(t) = type_annot { token_to_type(t.clone()) } else { Type::Void };
                 let initialized = value.is_some();
-                if let Err(e) = scope_stack.insert_variable(name.clone(), ty, true, initialized) {
-                    errors.push(e);
+                                                                        //global
+                if scope_stack.insert_variable(name.clone(), ty, true, initialized).is_err() {
+                    errors.push(ScopeError::VariableRedefinition);
                 }
                 if let Some(val) = value {
                     analyze_expr(val, &mut scope_stack, &mut errors);
                 }
             }
             Decl::Function { name, params, return_type, body } => {
-                let param_types: Vec<Type> = params.iter().map(|p| token_to_type(p.param_type.clone())).collect();
-                let ret_ty = return_type.as_ref().map(|t| token_to_type(t.clone())).unwrap_or(Type::Void);
-                if let Err(e) = scope_stack.insert_function_definition(name.clone(), param_types, ret_ty) {
-                    errors.push(e);
+                let mut param_types = Vec::new();
+                for p in params {
+                    param_types.push(token_to_type(p.param_type.clone()));
+                }
+                let ret_ty = if let Some(t) = return_type { token_to_type(t.clone()) } else { Type::Void };
+                if scope_stack.insert_function_definition(name.clone(), param_types.clone(), ret_ty).is_err() {
+                    errors.push(ScopeError::FunctionRedefinition);
                 } else {
-                    // Analyze function body
                     scope_stack.enter_scope();
-                    // Insert parameters
-                    for param in params {
-                        let ty = token_to_type(param.param_type.clone());
-                        if let Err(e) = scope_stack.insert_variable(param.name.clone(), ty, false, true) {
-                            errors.push(e);
-                        }
+                    for (p, ty) in params.iter().zip(param_types.iter()) {
+                                                                                        // not global   //always initialized
+                        let _ = scope_stack.insert_variable(p.name.clone(), ty.clone(), false, true);
                     }
-                    // Analyze body statements
                     analyze_stmt(body, &mut scope_stack, &mut errors);
                     scope_stack.exit_scope();
                 }
             }
+            Decl::Stmt(stmt) => {
+                analyze_stmt(stmt, &mut scope_stack, &mut errors);
+            }
         }
     }
-
+    
     scope_stack.exit_scope(); // Exit global scope
     errors
 }
 
 fn analyze_stmt(stmt: &Stmt, scope_stack: &mut ScopeStack, errors: &mut Vec<ScopeError>) {
+    
     match stmt {
         Stmt::Expr(expr) => {
             analyze_expr(expr, scope_stack, errors);
@@ -163,6 +170,11 @@ fn analyze_stmt(stmt: &Stmt, scope_stack: &mut ScopeStack, errors: &mut Vec<Scop
                 analyze_expr(expr, scope_stack, errors);
             }
         }
+        Stmt::Break => {
+            if !scope_stack.in_loop(){
+                errors.push(ScopeError::BreakMustInsideLoop);
+            }
+        }
         Stmt::If { condition, then_branch, else_branch } => {
             analyze_expr(condition, scope_stack, errors);
             analyze_stmt(then_branch, scope_stack, errors);
@@ -171,11 +183,16 @@ fn analyze_stmt(stmt: &Stmt, scope_stack: &mut ScopeStack, errors: &mut Vec<Scop
             }
         }
         Stmt::While { condition, body } => {
+            
             analyze_expr(condition, scope_stack, errors);
+            scope_stack.enter_loop();
             analyze_stmt(body, scope_stack, errors);
+            scope_stack.exit_loop();
         }
         Stmt::For { init, condition, increment, body } => {
             scope_stack.enter_scope();
+            scope_stack.enter_loop();
+
             if let Some(init_stmt) = init {
                 analyze_stmt(init_stmt, scope_stack, errors);
             }
@@ -187,6 +204,8 @@ fn analyze_stmt(stmt: &Stmt, scope_stack: &mut ScopeStack, errors: &mut Vec<Scop
             }
             analyze_stmt(body, scope_stack, errors);
             scope_stack.exit_scope();
+            scope_stack.exit_loop();
+
         }
         Stmt::Function { name, params, return_type, body } => {
             // Nested function? Assuming not, but handle as prototype for now
