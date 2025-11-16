@@ -94,14 +94,15 @@ impl ScopeStack {
 
     pub fn lookup_function(&self, name: &str) -> Result<&Symbol, ScopeError> {
         // begin search from this current scope
+
         let mut current = self.current.as_deref();
     
         // climb upward through parent scopes
         while let Some(scope) = current {
             // find the symbol in the current scope
             if let Some(sym) = scope.symbols.get(name) {
-
                 match &sym.kind {
+
                     SymbolKind::Function { defined: true, .. } => {
                         return Ok(sym);
                     }
@@ -111,11 +112,9 @@ impl ScopeStack {
                     }
                     // found something, but its not a function i.e., var()
                     _ => {
-                        return Err(ScopeError::UndefinedFunctionCalled);
                     }
                 }
             }
-    
             // stepp up the ladder
             current = scope.parent.as_deref();
         }
@@ -124,5 +123,34 @@ impl ScopeStack {
         Err(ScopeError::UndefinedFunctionCalled)
     }
     
+    pub fn lookup_variable(&self, name: &str) -> Result<&Symbol, ScopeError> {
+        let mut current = self.current.as_deref();
+    
+        while let Some(scope) = current {
+            if let Some(sym) = scope.symbols.get(name) {
+    
+                match &sym.kind {
+                    // found 
+                    SymbolKind::Variable => {
+                        return Ok(sym);
+                    }
+    
+                    // parameter found
+                    SymbolKind::Parameter => {
+                        return Ok(sym);
+                    }
+    
+                    // found a function when expecting a variable 
+                    SymbolKind::Function { .. } => {
+                        return Err(ScopeError::UndeclaredVariableAccessed);
+                    }
+                }
+            }
+    
+            current = scope.parent.as_deref();
+        }
+    
+        Err(ScopeError::UndeclaredVariableAccessed)
+    }
     
 }
