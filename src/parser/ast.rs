@@ -7,7 +7,7 @@ pub enum Expr {
     Boolean(bool),
     StringLit(String),
     Binary {
-        left: Box<Expr>,
+        left: Box<Expr>, //Box is a smart pointer that allocates data on heap, here particularly pointer to another expression on the heap
         operator: TokenKind,
         right: Box<Expr>,
     },
@@ -19,7 +19,7 @@ pub enum Expr {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
-    Grouping(Box<Expr>),
+    Grouping(Box<Expr>), // just a wrapper around another expression
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +32,7 @@ pub enum Stmt {
     },
     Block(Vec<Stmt>),
     Return(Option<Expr>),
+    Break,
     If {
         condition: Expr,
         then_branch: Box<Stmt>,
