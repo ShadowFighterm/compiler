@@ -345,6 +345,7 @@ impl<'a> HandLexer<'a> {
             "bool" => TokenKind::T_BOOL,
             "string" => TokenKind::T_STRING,
             "return" => TokenKind::T_RETURN,
+            "break" => TokenKind::T_BREAK,
             "if" => TokenKind::T_IF,
             "else" => TokenKind::T_ELSE,
             "for" => TokenKind::T_FOR,
