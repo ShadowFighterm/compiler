@@ -75,6 +75,7 @@ pub enum Decl {
         type_annot: Option<TokenKind>,
         value: Option<Expr>,
     },
+    Stmt(Stmt),
 }
 
 #[derive(Debug, Clone)]
