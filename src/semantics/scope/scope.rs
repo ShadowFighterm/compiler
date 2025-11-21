@@ -6,9 +6,11 @@ pub enum Type { //Had to introduce Type enum to make function signatures work
     Float,
     Bool,
     Char,
+    String,
     Void,
-    Custom(String),           
-    Array(Box<Type>, usize),  
+    Unknown,
+    Custom(String),
+    Array(Box<Type>, usize),
     Pointer(Box<Type>),
 }
 
@@ -22,11 +24,13 @@ pub enum ScopeError {
     FunctionPrototypeRedefinition,
     FunctionRedefinition,
     FunctionRedefinitionAsPrototype,
+    FunctionSignatureConflict,
     // variables
     VariableRedefinition,
     VariableUsedBeforeInit,
     // generic
     NoCurrentScope,
+    BreakMustInsideLoop,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +63,10 @@ impl Symbol {
             initialized,
         }
     }
+
+    // Example usage: 
+    // let p1 = new_parameter("x", ty, 0);        // &str
+    // let p2 = new_parameter(String::from("y"), ty, 0); // String
 
     pub fn new_parameter(name: impl Into<String>, ty: Type, scope_level: usize) -> Self {
         Self {
@@ -100,7 +108,13 @@ pub struct Scope {
 
 impl Scope {
     pub fn new(parent: Option<Box<Scope>>) -> Self {
-        let level = parent.as_ref().map(|p| p.level + 1).unwrap_or(0);
+
+        let level = if let Some(ref p) = parent {
+            p.level + 1
+        } else {
+            0
+        };
+
         Scope {
             symbols: HashMap::new(),
             parent,
@@ -112,20 +126,33 @@ impl Scope {
 #[derive(Debug)]
 pub struct ScopeStack {
     pub current: Option<Box<Scope>>,
+    loop_depth: usize,
 }
 
 impl ScopeStack {
     pub fn new() -> Self {
-        ScopeStack { current: None }
+        ScopeStack { current: None, loop_depth:0 }
+    }
+
+    pub fn enter_loop(&mut self) {
+        self.loop_depth += 1;
+    }
+
+    pub fn exit_loop(&mut self) {
+        self.loop_depth -= 1;
+    }
+
+    pub fn in_loop(&self) -> bool {
+        self.loop_depth > 0
     }
 
     /// Enter a new inner scope
     pub fn enter_scope(&mut self) {
-        let new_scope = Scope::new(self.current.take());
+        let new_scope = Scope::new(self.current.take()); // take ownership of the current Option<Box<Scope>>, leave self.current as None
         self.current = Some(Box::new(new_scope));
     }
 
-    /// Exit current scope and return to parent
+    /// exit current scope and return to parent
     pub fn exit_scope(&mut self) {
         if let Some(cur) = self.current.take() {
             self.current = cur.parent;
@@ -162,7 +189,7 @@ impl ScopeStack {
                     if &existing_params[..] == &params[..] && existing_ret == &return_type {
                         return Err(ScopeError::FunctionPrototypeRedefinition);
                     } else {
-                        return Err(ScopeError::FunctionPrototypeRedefinition);
+                        return Err(ScopeError::FunctionSignatureConflict);
                     }
                 }
                 SymbolKind::Function { defined: true, .. } => {
@@ -185,7 +212,7 @@ impl ScopeStack {
                 SymbolKind::Function { defined: false, params: existing_params, return_type: existing_ret, .. } => {
                     
                     if &existing_params[..] != &params[..] || existing_ret != &return_type {
-                        return Err(ScopeError::FunctionRedefinitionAsPrototype);
+                        return Err(ScopeError::FunctionSignatureConflict);
                     } else {
 
                         let sym = Symbol::new_function_definition(name.clone(), params, return_type, scope.level);
@@ -214,7 +241,7 @@ impl ScopeStack {
             if let Some(sym) = scope.symbols.get(name) {
                 return Some(sym);
             }
-            current = scope.parent.as_deref();
+            current = scope.parent.as_deref(); //At each step, scope is a reference to the current scope in the chain
         }
         None
     }
@@ -254,7 +281,7 @@ impl ScopeStack {
         self.find_symbol(name)
     }
 
-
+    // this function is specifically intended for variables and parameters, not for functions
     pub fn mark_initialized(&mut self, name: &str) -> Result<(), ScopeError> {
         // Need to find the symbol mutably in the chain of scopes
         let mut current = self.current.as_deref_mut();
@@ -273,16 +300,27 @@ impl ScopeStack {
         Err(ScopeError::UndeclaredIdentifier)
     }
 
-    // helper
+
+    // Check whether a variable or parameter with the given name exists in any scope
     pub fn variable_exists(&self, name: &str) -> bool {
-        self.find_symbol(name).map_or(false, |s| {
-            matches!(s.kind, SymbolKind::Variable { .. } | SymbolKind::Parameter)
-        })
+        if let Some(symbol) = self.find_symbol(name) {
+            // return true only if it is a var
+            matches!(symbol.kind, SymbolKind::Variable { .. } | SymbolKind::Parameter)
+        } else {
+            false
+        }
     }
 
-    // helper
+
     pub fn current_level(&self) -> usize {
-        self.current.as_deref().map(|s| s.level).unwrap_or(0)
+
+        if let Some(scope) = self.current.as_deref() {
+            scope.level
+        } else {
+            0
+        }
     }
+
+    
 }
 
