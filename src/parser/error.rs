@@ -16,6 +16,7 @@ pub enum ParseErrorKind {
     ExpectedExpr,
     UnexpectedToken(TokenKind),
     Expected(String), 
+    UnexpectedStmt,
 }
 
 impl fmt::Display for ParseError {
@@ -26,6 +27,7 @@ impl fmt::Display for ParseError {
             ParseErrorKind::ExpectedTypeToken => write!(f, "Expected type token"),
             ParseErrorKind::ExpectedExpr => write!(f, "Expected expression"),
             ParseErrorKind::UnexpectedToken(kind) => write!(f, "Unexpected token: {}", kind),
+            ParseErrorKind::UnexpectedStmt => write!(f, "Expected statement"),
             ParseErrorKind::Expected(msg) => write!(f, "{}", msg),
         }?;
         write!(f, " at line {}, column {}", self.line, self.col)
