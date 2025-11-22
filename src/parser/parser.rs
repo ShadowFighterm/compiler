@@ -238,8 +238,19 @@ impl<'a> Parser<'a> {
 
     // statement parsing
     fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        // If next token is a closing brace, stop parsing — it's the end of a block
+        if self.check(&TokenKind::T_BRACER) {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedStmt,
+                line: self.peek().unwrap().line,
+                col: self.peek().unwrap().col,
+            });
+        }
         if self.match_token(&TokenKind::T_RETURN) {
             return self.parse_return_statement();
+        }
+        if self.match_token(&TokenKind::T_BREAK) {
+            return self.parse_break_statement();
         }
         if self.match_token(&TokenKind::T_IF) {
             return self.parse_if_statement();
@@ -262,6 +273,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_break_statement(&mut self) -> Result<Stmt, ParseError> {
+        self.consume(&TokenKind::T_SEMICOLON, "';' after break")?;
+        Ok(Stmt::Break)
+    }
+    
+
     fn parse_return_statement(&mut self) -> Result<Stmt, ParseError> {
         let value = if !self.check(&TokenKind::T_SEMICOLON) {
             Some(self.parse_expression()?)
@@ -276,27 +293,33 @@ impl<'a> Parser<'a> {
         self.consume(&TokenKind::T_PARENL, "'(' after 'if'")?;
         let condition = self.parse_expression()?;
         self.consume(&TokenKind::T_PARENR, "')' after condition")?;
-        
+
         let then_branch = Box::new(self.parse_statement()?);
+
         let else_branch = if self.match_token(&TokenKind::T_ELSE) {
             Some(Box::new(self.parse_statement()?))
         } else {
             None
         };
-        
+
         Ok(Stmt::If {
             condition,
             then_branch,
             else_branch,
         })
     }
+    
 
     fn parse_while_statement(&mut self) -> Result<Stmt, ParseError> {
         self.consume(&TokenKind::T_PARENL, "'(' after 'while'")?;
         let condition = self.parse_expression()?;
         self.consume(&TokenKind::T_PARENR, "')' after condition")?;
-        let body = Box::new(self.parse_statement()?);
-        
+        let body = if self.match_token(&TokenKind::T_BRACEL) {
+            Box::new(self.parse_block_statement()?)
+        } else {
+            Box::new(self.parse_statement()?)
+        };
+
         Ok(Stmt::While { condition, body })
     }
 
@@ -340,14 +363,17 @@ impl<'a> Parser<'a> {
 
     fn parse_block_statement(&mut self) -> Result<Stmt, ParseError> {
         let mut statements = Vec::new();
-        
+
+        // Assume '{' already consumed by caller
+
         while !self.check(&TokenKind::T_BRACER) && !self.is_at_end() {
-            statements.push(self.parse_statement()?);  // Changed to parse_statement
+            statements.push(self.parse_statement()?);
         }
-        
+
         self.consume(&TokenKind::T_BRACER, "'}' after block")?;
         Ok(Stmt::Block(statements))
     }
+    
 
     fn parse_expression_statement(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expression()?;
@@ -395,26 +421,45 @@ impl<'a> Parser<'a> {
 
     // declaration parsing 
     fn parse_declaration(&mut self) -> Result<Decl, ParseError> {
+        //  Function declaration
         if self.match_token(&TokenKind::T_FUNCTION) {
-            self.parse_function_declaration()
-        } else if self.is_type_token(self.peek()) {
-            self.parse_global_var_declaration()
-        } else {
-            // Treat as statement
-            let stmt = self.parse_statement()?;
-            Ok(Decl::GlobalVar {
-                name: "".to_string(), // Placeholder
-                type_annot: None,
-                value: Some(match stmt {
-                    Stmt::Expr(expr) => expr,
-                    _ => {
-                        let (line, col) = self.peek().map(|t| (t.line, t.col)).unwrap_or((0, 0));
-                        return Err(ParseError { kind: ParseErrorKind::Expected("expression".to_string()), line, col });
-                    }
-                }),
-            })
+            return self.parse_function_declaration();
+        }
+    
+        //  Global variable declaration
+        if self.is_type_token(self.peek()) {
+            return self.parse_global_var_declaration();
+        }
+    
+        // Top-level statements are invalid except top-level expressions
+        if self.check(&TokenKind::T_EOF) {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedEOF,
+                line: self.peek().unwrap().line,
+                col: self.peek().unwrap().col,
+            });
+        }
+    
+        // Attempt to parse a statement
+        let stmt = self.parse_statement()?;
+
+        match stmt {
+            Stmt::Expr(expr) => {
+                // Optional: allow top-level expressions as global initializers
+                Ok(Decl::GlobalVar {
+                    name: "".to_string(),  // placeholder if needed
+                    type_annot: None,
+                    value: Some(expr),
+                })
+            }
+            _ => {
+                // Allow other statements at top level
+                Ok(Decl::Stmt(stmt))
+            }
         }
     }
+    
+    
 
     fn parse_function_declaration(&mut self) -> Result<Decl, ParseError> {
         let name = if let Some(token) = self.advance() {
