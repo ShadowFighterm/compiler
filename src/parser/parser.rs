@@ -73,8 +73,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_assignment(&mut self) -> Result<Expr, ParseError> {
-        let expr = self.parse_equality()?; //parse LHS first and equality has higher precedence than assignment
-        //? means if error, return the error another idomatic fanciness
+        let expr = self.parse_bitwise_or()?; // Changed to parse bitwise_or before assignment for precedence
         if self.match_token(&TokenKind::T_ASSIGNOP) {
             let value = self.parse_assignment()?; // Right-associative
             if let Expr::Identifier(name) = expr {
@@ -87,7 +86,34 @@ impl<'a> Parser<'a> {
             let (line, col) = self.previous().map(|t| (t.line, t.col)).unwrap_or((0, 0));
             return Err(ParseError { kind: ParseErrorKind::Expected("variable name".to_string()), line, col });
         }
+        Ok(expr)
+    }
 
+    fn parse_bitwise_or(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_bitwise_and()?;
+        while self.match_token(&TokenKind::T_PIPE) {
+            let operator = self.previous().unwrap().kind.clone();
+            let right = self.parse_bitwise_and()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                operator,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_bitwise_and(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_equality()?;
+        while self.match_token(&TokenKind::T_AMP) {
+            let operator = self.previous().unwrap().kind.clone();
+            let right = self.parse_equality()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                operator,
+                right: Box::new(right),
+            };
+        }
         Ok(expr)
     }
 
@@ -103,7 +129,6 @@ impl<'a> Parser<'a> {
                 right: Box::new(right),
             };
         }
-
         Ok(expr)
     }
 
@@ -120,14 +145,28 @@ impl<'a> Parser<'a> {
                 right: Box::new(right),
             };
         }
-
         Ok(expr)
     }
 
     fn parse_term(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_factor()?;
+        let mut expr = self.parse_shift()?;
 
         while self.match_token(&TokenKind::T_PLUS) || self.match_token(&TokenKind::T_MINUS) {
+            let operator = self.previous().unwrap().kind.clone();
+            let right = self.parse_shift()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                operator,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_factor()?;
+
+        while self.match_token(&TokenKind::T_LSHIFT) || self.match_token(&TokenKind::T_RSHIFT) {
             let operator = self.previous().unwrap().kind.clone();
             let right = self.parse_factor()?;
             expr = Expr::Binary {
@@ -136,15 +175,29 @@ impl<'a> Parser<'a> {
                 right: Box::new(right),
             };
         }
-
         Ok(expr)
     }
 
     fn parse_factor(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_unary()?;
+        let mut expr = self.parse_caret()?;
 
         while self.match_token(&TokenKind::T_STAR) || self.match_token(&TokenKind::T_SLASH) ||
               self.match_token(&TokenKind::T_PERCENT) {
+            let operator = self.previous().unwrap().kind.clone();
+            let right = self.parse_caret()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                operator,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_caret(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_unary()?;
+
+        while self.match_token(&TokenKind::T_CARET) {
             let operator = self.previous().unwrap().kind.clone();
             let right = self.parse_unary()?;
             expr = Expr::Binary {
@@ -153,7 +206,6 @@ impl<'a> Parser<'a> {
                 right: Box::new(right),
             };
         }
-
         Ok(expr)
     }
 
@@ -166,11 +218,19 @@ impl<'a> Parser<'a> {
                 expr: Box::new(right),
             });
         }
-
         self.parse_primary()
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+        // Skip over optional starting T_QUOTES tokens (string quotes)
+        while let Some(token) = self.peek() {
+            if token.kind == TokenKind::T_QUOTES {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
         if let Some(token) = self.peek() {
             match &token.kind {
                 TokenKind::T_BOOLLIT(b) => {
@@ -191,6 +251,14 @@ impl<'a> Parser<'a> {
                 TokenKind::T_STRINGLIT(s) => {
                     let s = s.clone();
                     self.advance();
+
+                    // Skip over optional ending T_QUOTES tokens
+                    if let Some(token) = self.peek() {
+                        if token.kind == TokenKind::T_QUOTES {
+                            self.advance();
+                        }
+                    }
+
                     return Ok(Expr::StringLit(s));
                 }
                 TokenKind::T_IDENTIFIER(name) => {
@@ -382,7 +450,7 @@ impl<'a> Parser<'a> {
     }
     
     fn parse_declaration_statement(&mut self) -> Result<Stmt, ParseError> {
-        let type_annot = self.advance().map(|t| t.kind.clone()); // Consume type token
+        let type_annot = self.advance().map(|t| t.kind.clone());
         let name = if let Some(token) = self.advance() {
             if let TokenKind::T_IDENTIFIER(n) = &token.kind {
                 n.clone()
@@ -398,7 +466,6 @@ impl<'a> Parser<'a> {
         let value = if self.match_token(&TokenKind::T_ASSIGNOP) {
             self.parse_expression()?
         } else {
-            // Default values based on type
             match &type_annot {
                 Some(TokenKind::T_INT) => Expr::Integer(0),
                 Some(TokenKind::T_FLOAT) => Expr::Float(0.0),
@@ -442,7 +509,7 @@ impl<'a> Parser<'a> {
     
         // Attempt to parse a statement
         let stmt = self.parse_statement()?;
-
+ 
         match stmt {
             Stmt::Expr(expr) => {
                 // Optional: allow top-level expressions as global initializers
@@ -534,7 +601,20 @@ impl<'a> Parser<'a> {
         }
 
     fn parse_global_var_declaration(&mut self) -> Result<Decl, ParseError> {
+        if let Some(token) = self.peek() {
+            println!("parse_global_var_declaration at line {}, token: {:?}", token.line, token.kind);
+        } else {
+            println!("parse_global_var_declaration: No token peeked");
+        }
+
         let type_annot = self.advance().map(|t| t.kind.clone());
+
+        if let Some(token) = self.peek() {
+            println!("After consuming type token, next token: {:?}", token.kind);
+        } else {
+            println!("After consuming type token, no next token");
+        }
+
         let name = if let Some(token) = self.advance() {
             if let TokenKind::T_IDENTIFIER(n) = &token.kind {
                 n.clone()
@@ -546,12 +626,25 @@ impl<'a> Parser<'a> {
             let (line, col) = self.previous().map(|t| (t.line, t.col)).unwrap_or((0, 0));
             return Err(ParseError { kind: ParseErrorKind::ExpectedIdentifier, line, col });
         };
+
+        if let Some(token) = self.peek() {
+            println!("After consuming identifier, next token: {:?}", token.kind);
+        } else {
+            println!("After consuming identifier, no next token");
+        }
         
         let value = if self.match_token(&TokenKind::T_ASSIGNOP) {
+            println!("Assignment detected");
             Some(self.parse_expression()?)
         } else {
             None
         };
+
+        if let Some(token) = self.peek() {
+            println!("Before consuming semicolon, next token: {:?}", token.kind);
+        } else {
+            println!("Before consuming semicolon, no next token");
+        }
         
         self.consume(&TokenKind::T_SEMICOLON, "';' after declaration")?;
         
