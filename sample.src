@@ -1,7 +1,84 @@
-fn factorial(int n): int {
-    if (n <= 1) {
-        return 1;
-    } else {
-        return n * factorial(n - 1);
-    }
+int a;
+int b;
+a = b;
+int x = 5;
+int y;
+x = 10;
+y = "text";
+if (true) {
+  int z = x + 3;
+  z = z + y;
 }
+// Call undefined function
+call_undefined();
+// Function with incorrect param count
+fn foo(int a,bool b): int {
+  return a + 1;
+}
+foo(1); // fewer args
+foo(1, 2, 3); // too many args
+
+// Function returns wrong type
+fn bad_return(int a): bool {
+  return a + 1;  // should be bool
+}
+bad_return(5);
+
+// Boolean op on non-bools
+int p = 1;
+int q = 2;
+//int r = p && q;  // invalid bool op on int
+
+// Bit op on non-numeric
+bool flag = true;
+//int s = flag & 1;  // invalid bit op on bool
+
+// Shift op on non-int
+float f = 3.14;
+int t = f << 2;  // invalid shift on float
+
+// Add op on non-numeric
+string str = "hello";
+int u = str + 1;  // invalid add op on string and int
+
+// Empty return statement inside function returning non-void
+fn no_return(): int {
+  return;
+}
+
+// Non-boolean condition fixed
+if (true) {
+  int v = 2;
+}
+
+// Trigger: ExpressionTypeMismatch (comparison of int to bool)
+if (1 == true) {
+  int w = 1;
+}
+
+// Trigger: ExpectedBooleanExpression (non-boolean in if condition)
+if (5) {
+  int y = 2;
+}
+
+// Trigger: ErroneousBreak (break outside loop)
+break;
+
+// Trigger: EmptyExpression (empty expr in expression stmt)
+/* Empty expression statement removed to avoid parse error */
+
+// Trigger: AttemptedExponentiationOfNonNumeric (exponent on bool)
+bool qflag = true;
+int exp = qflag ^ 2;
+
+// Trigger: ReturnStmtNotFound in function without return
+fn missing_return(): int {
+  int x = 1;
+}
+
+// Trigger: VariableRedefinition
+int a;
+
+// Trigger: VariableUsedBeforeInit
+int uninit;
+int res = uninit + 1;
