@@ -2,6 +2,7 @@
 #![allow(non_snake_case)]
 mod lexer;
 mod token;
+mod ir;
 mod parser;  // Add parser module
 mod semantics;
 use crate::semantics::scope;
@@ -11,6 +12,8 @@ use crate::lexer::{HandLexer, RegexLexer};
 use crate::parser::parser::Parser;  // Import parser type
 use crate::parser::ast::{Expr, Stmt, Decl, Param, Program};  // Import AST types
 use crate::semantics::scope::scope::{ScopeStack, Symbol, SymbolKind, Type, ScopeError};
+use crate::ir::ir_generator::IRGenerator;
+
 use std::env;
 use std::fs;
 
@@ -46,29 +49,34 @@ fn main() {
             println!("\n=== SEMANTIC ANALYSIS ===");
             let (scope_errors, typechk_errors) = perform_semantic_analysis(&program);
 
-            if scope_errors.is_empty() {
-                println!("Scope analysis successful! No errors found.");
-            } else {
-                println!("Scope analysis found {} errors:", scope_errors.len());
-                for error in &scope_errors {
-                    println!("  {:?}", error);
-                }
-            }
+            // Print semantic errors here...
 
-            if typechk_errors.is_empty() {
-                println!("Type checking successful! No errors found.");
-            } else {
-                println!("Type checking found {} errors:", typechk_errors.len());
-                for error in &typechk_errors {
-                    println!("  {:?}", error);
+            println!("\n=== INTERMEDIATE REPRESENTATION (TAC) ===");
+            let mut irgen = IRGenerator::new();
+            for decl in &program.declarations {
+                match decl {
+                    Decl::Stmt(stmt) => irgen.generate_statement(stmt),
+                    Decl::Function { body, .. } => irgen.generate_statement(body),
+                    Decl::GlobalVar { value, name, .. } => {
+                        if let Some(expr) = value {
+                            let pseudo_let = Stmt::Let {
+                                name: name.clone(),
+                                type_annot: None,
+                                value: expr.clone(),
+                            };
+                            irgen.generate_statement(&pseudo_let);
+                        }
+                    }
                 }
             }
+            irgen.print_ir_code();
         }
         Err(e) => {
             eprintln!("Parse error: {}", e);
             return;
         }
     }
+
 }
 
 // Helper function to pretty print the program
